@@ -67,7 +67,7 @@ if __name__ == "__main__":
     open_gripper = api.open_gripper
     close_gripper = api.close_gripper
     task_completed = api.task_completed
-
+#%%
     # Start process
     env_process = Process(target=run_simulation_environment, name="EnvProcess", args=[args, env_connection, logger])
     env_process.start()
@@ -80,6 +80,7 @@ if __name__ == "__main__":
     api.command = command
 
     # ChatGPT
+    
     logger.info(PROGRESS + "STARTING TASK..." + ENDC)
 
     messages = []
@@ -91,7 +92,7 @@ if __name__ == "__main__":
     logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
     messages = models.get_chatgpt_output(args.language_model, new_prompt, messages, "system")
     logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
-
+#%%
     while True:
 
         while not api.completed_task:
