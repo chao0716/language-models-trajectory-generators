@@ -1,241 +1,215 @@
+from utils import render_camera_in_sim
 import numpy as np
-import sys
-import torch
-import math
-import config
-import models
-import utils
 from PIL import Image
-from prompts.success_detection_prompt import SUCCESS_DETECTION_PROMPT
-from config import OK, PROGRESS, FAIL, ENDC
-from config import CAPTURE_IMAGES, ADD_BOUNDING_CUBES, ADD_TRAJECTORY_POINTS, EXECUTE_TRAJECTORY, OPEN_GRIPPER, CLOSE_GRIPPER, TASK_COMPLETED, RESET_ENVIRONMENT
+from utils import get_chatgpt_output, render_camera_in_sim, encode_image_to_base64
+import os
+import requests
+
 
 class API:
 
-    def __init__(self, args, main_connection, logger, langsam_model, xmem_model, device):
+    def __init__(self, langsam_model, command, language_model, initial_img_base64):
 
-        self.args = args
-        self.main_connection = main_connection
-        self.logger = logger
         self.langsam_model = langsam_model
-        self.xmem_model = xmem_model
-        self.device = device
-        self.segmentation_texts = []
-        self.segmentation_count = 0
-        self.trajectory_length = 0
-        self.attempted_task = False
         self.completed_task = False
         self.failed_task = False
-        self.head_camera_position = None
-        self.head_camera_orientation_q = None
-        self.wrist_camera_position = None
-        self.wrist_camera_orientation_q = None
-        self.command = None
-
-
-
-    def detect_object(self, segmentation_text):
-
-        self.logger.info(PROGRESS + "Capturing head and wrist camera images..." + ENDC)
-        self.main_connection.send([CAPTURE_IMAGES])
-        [head_camera_position, head_camera_orientation_q, wrist_camera_position, wrist_camera_orientation_q, env_connection_message] = self.main_connection.recv()
-        self.logger.info(env_connection_message)
-
-        self.head_camera_position = head_camera_position
-        self.head_camera_orientation_q = head_camera_orientation_q
-        self.wrist_camera_position = wrist_camera_position
-        self.wrist_camera_orientation_q = wrist_camera_orientation_q
-
-        rgb_image_head = Image.open(config.rgb_image_head_path).convert("RGB")
-        depth_image_head = Image.open(config.depth_image_head_path).convert("L")
-        depth_array = np.array(depth_image_head) / 255.
-
-        if self.segmentation_count == 0:
-            xmem_image = Image.fromarray(np.zeros_like(depth_array)).convert("L")
-            xmem_image.save(config.xmem_input_path)
-
-        segmentation_texts = [segmentation_text]
-
-        self.logger.info(PROGRESS + "Segmenting head camera image..." + ENDC)
-        model_predictions, boxes, segmentation_texts = models.get_langsam_output(rgb_image_head, self.langsam_model, segmentation_texts, self.segmentation_count)
-        self.logger.info(OK + "Finished segmenting head camera image!" + ENDC)
-
-        masks = utils.get_segmentation_mask(model_predictions, config.segmentation_threshold)
-
-        bounding_cubes_world_coordinates, bounding_cubes_orientations = utils.get_bounding_cube_from_point_cloud(rgb_image_head, masks, depth_array, self.head_camera_position, self.head_camera_orientation_q, self.segmentation_count)
-
-        utils.save_xmem_image(masks)
-
-        self.segmentation_texts.extend(segmentation_texts)
-
-        self.logger.info(PROGRESS + "Adding bounding cubes to the environment..." + ENDC)
-        self.main_connection.send([ADD_BOUNDING_CUBES, bounding_cubes_world_coordinates])
-        [env_connection_message] = self.main_connection.recv()
-        self.logger.info(env_connection_message)
-
-        for i, bounding_cube_world_coordinates in enumerate(bounding_cubes_world_coordinates):
-
-            bounding_cube_world_coordinates[4][2] -= config.depth_offset
-
-            object_width = np.around(np.linalg.norm(bounding_cube_world_coordinates[1] - bounding_cube_world_coordinates[0]), 3)
-            object_length = np.around(np.linalg.norm(bounding_cube_world_coordinates[2] - bounding_cube_world_coordinates[1]), 3)
-            object_height = np.around(np.linalg.norm(bounding_cube_world_coordinates[5] - bounding_cube_world_coordinates[0]), 3)
-
-            print("Position of " + segmentation_texts[i] + ":", list(np.around(bounding_cube_world_coordinates[4], 3)))
-
-            print("Dimensions:")
-            print("Width:", object_width)
-            print("Length:", object_length)
-            print("Height:", object_height)
-
-            if object_width < object_length:
-                print("Orientation along shorter side (width):", np.around(bounding_cubes_orientations[i][0], 3))
-                print("Orientation along longer side (length):", np.around(bounding_cubes_orientations[i][1], 3), "\n")
-            else:
-                print("Orientation along shorter side (length):", np.around(bounding_cubes_orientations[i][1], 3))
-                print("Orientation along longer side (width):", np.around(bounding_cubes_orientations[i][0], 3), "\n")
-
-        self.segmentation_count += 1
-
-
-
-    def execute_trajectory(self, trajectory):
-
-        self.logger.info(PROGRESS + "Adding trajectory points to the environment..." + ENDC)
-        self.main_connection.send([ADD_TRAJECTORY_POINTS, trajectory])
-
-        self.logger.info(PROGRESS + "Executing generated trajectory..." + ENDC)
-        self.main_connection.send([EXECUTE_TRAJECTORY, trajectory])
-
-        self.trajectory_length += len(trajectory)
-
-
-
-    def open_gripper(self):
-
-        self.logger.info(PROGRESS + "Opening gripper..." + ENDC)
-        self.main_connection.send([OPEN_GRIPPER])
-
-
-
-    def close_gripper(self):
-
-        self.logger.info(PROGRESS + "Closing gripper..." + ENDC)
-        self.main_connection.send([CLOSE_GRIPPER])
-
-
+        self.command = command
+        self.language_model = language_model
+        self.initial_img_base64 = initial_img_base64
 
     def task_completed(self):
-
-        if self.attempted_task:
-
-            self.completed_task = True
-
-        else:
-
-            self.logger.info(PROGRESS + "Waiting to execute all generated trajectories..." + ENDC)
-            self.main_connection.send([TASK_COMPLETED])
-            [env_connection_message] = self.main_connection.recv()
-            self.logger.info(env_connection_message)
-
-            self.logger.info(PROGRESS + "Generating XMem output..." + ENDC)
-            masks = models.get_xmem_output(self.xmem_model, self.device, self.trajectory_length)
-            self.logger.info(OK + "Finished generating XMem output!" + ENDC)
-
-            num_objects = len(np.unique(masks[0])) - 1
-
-            new_prompt = SUCCESS_DETECTION_PROMPT.replace("[INSERT TASK]", self.command)
-            new_prompt += "\n"
-
-            self.logger.info(PROGRESS + "Calculating object bounding cubes..." + ENDC)
-
-            for object in range(1, num_objects + 1):
-
-                object_positions = []
-                object_orientations = []
-
-                idx_offset = 0
-
-                for i, mask in enumerate(masks):
-
-                    rgb_image = Image.open(config.rgb_image_trajectory_path.format(step=i * config.xmem_output_every)).convert("RGB")
-                    depth_image = Image.open(config.depth_image_trajectory_path.format(step=i * config.xmem_output_every)).convert("L")
-                    depth_array = np.array(depth_image) / 255.
-
-                    object_mask = mask.copy()
-                    object_mask[object_mask != object] = False
-                    object_mask[object_mask == object] = True
-                    object_mask = torch.Tensor(object_mask)
-
-                    bounding_cubes, orientations = utils.get_bounding_cube_from_point_cloud(rgb_image, [object_mask], depth_array, self.head_camera_position, self.head_camera_orientation_q, object - 1)
-
-                    if len(bounding_cubes) == 0:
-
-                        self.logger.info("No bounding cube found: removed.")
-                        idx_offset += 1
-
-                    else:
-
-                        [bounding_cube] = bounding_cubes
-                        [orientation] = orientations
-                        position = bounding_cube[4]
-                        orientation = orientation[0]
-                        orientation = np.mod(orientation + math.pi, 2 * math.pi) - math.pi
-
-                        object_positions.append(position)
-
-                        if i == 0:
-
-                            object_orientations.append(orientation)
-
-                        else:
-
-                            previous_orientation = object_orientations[i - 1 - idx_offset]
-                            possible_orientations = np.array([np.mod(orientation + i * math.pi / 2 + math.pi, 2 * math.pi) - math.pi for i in range(4)])
-                            circular_difference = np.minimum(np.abs(possible_orientations - previous_orientation), 2 * math.pi - np.abs(possible_orientations - previous_orientation))
-                            min_index = np.argmin(circular_difference)
-                            orientation = possible_orientations[min_index]
-                            object_orientations.append(orientation)
-
-                new_prompt += self.segmentation_texts[object - 1] + " trajectory positions and orientations:\n"
-                new_prompt += "Positions:\n"
-                new_prompt += str(np.around([position for p, position in enumerate(object_positions) if p % config.xmem_lm_input_every == 0], 3)) + "\n"
-                new_prompt += "Orientations:\n"
-                new_prompt += str(np.around([orientation for o, orientation in enumerate(object_orientations) if o % config.xmem_lm_input_every == 0], 3)) + "\n"
-                new_prompt += "\n"
-
-            self.logger.info(OK + "Finished calculating object bounding cubes!" + ENDC)
-
-            self.attempted_task = True
-
-            messages = []
-
-            self.logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
-            messages = models.get_chatgpt_output(self.args.language_model, new_prompt, messages, "system", file=sys.stderr)
-            self.logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
-
-            code_block = messages[-1]["content"].split("```python")
-
-            task_completed = self.task_completed
-            task_failed = self.task_failed
-
-            for block in code_block:
-                if len(block.split("```")) > 1:
-                    code = block.split("```")[0]
-                    exec(code)
-
-
+        self.completed_task = True
+        self.failed_task = False
 
     def task_failed(self):
-
+        self.completed_task = False
         self.failed_task = True
 
-        self.logger.info(PROGRESS + "Resetting environment..." + ENDC)
-        self.main_connection.send([RESET_ENVIRONMENT])
-        [env_connection_message] = self.main_connection.recv()
-        self.logger.info(env_connection_message)
+    # Function to check if the task is completed using GPT-4o
 
-        self.segmentation_count = 0
-        self.trajectory_length = 0
-        self.segmentation_texts = []
-        self.attempted_task = False
+    def check_task_completed(self):
+
+        current_rgb_img, _ = render_camera_in_sim()
+        current_img_base64 = encode_image_to_base64(current_rgb_img)
+
+        api_key = os.getenv("OPENAI_API_KEY")
+        # Prepare the payload for GPT-4o
+        payload = {
+            "model": "gpt-4o",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "You are tasked with determining whether a user command was completed successfully or not, based on the current environment observation after the execution of the task and initial environment observation."
+                        },
+                        {
+                            "type": "text",
+                            "text": f"The user command is: {self.command}"
+                        },
+                        {
+                            "type": "text",
+                            "text":
+                            '''1. If the task was completed successfully, output
+                            ```python
+                            task_completed()
+                            ```.
+                            
+                            2. If the task was not completed successfully, output
+                            ```python
+                            task_failed()
+                            ```.
+                            Do not define the task_completed and task_failed functions yourself.
+                            '''
+                        },
+                        {
+                            "type": "text",
+                            "text": "The initial environment image is provided below."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{self.initial_img_base64}"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "The current environment image is provided below."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{current_img_base64}"
+                            }
+                        }
+                    ]
+                }
+            ],
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+        # Convert the response to a dictionary
+        response_dict = response.json()
+
+        # Extract the message content
+        messages = response_dict['choices'][0]['message']['content']
+
+        # Print the extracted content
+        print(messages)
+
+        code_block = messages.split("```python")
+        
+        task_completed = self.task_completed
+        task_failed = self.task_failed
+        for block in code_block:
+            if len(block.split("```")) > 1:
+                code = block.split("```")[0]
+                print(code)
+                exec(code)
+
+    def detect_object(self, text_prompt):
+
+        rgb_img, depth_camera_coordinates = render_camera_in_sim()
+        rgb_img = Image.fromarray(rgb_img.astype('uint8'), 'RGB')
+
+        x = depth_camera_coordinates[:, :, 0]
+        y = depth_camera_coordinates[:, :, 1]
+        z = depth_camera_coordinates[:, :, 2]
+
+        masks, boxes, phrases, logits = self.langsam_model.predict(
+            rgb_img, text_prompt)
+        # Initialize an empty dictionary
+        mask_dict = {}
+
+        if len(masks) == 0:
+            print(
+                f"No objects of the '{text_prompt}' prompt detected in the image.")
+        else:
+            # Convert masks to numpy arrays
+            masks_np = [mask.squeeze().cpu().numpy() for mask in masks]
+
+            for i, (mask_np, box, logit) in enumerate(zip(masks_np, boxes, logits)):
+                # Convert logit to a scalar before rounding
+                confidence_score = round(logit.item(), 2)
+                # Change confidence_score if wrong object is detected
+                if confidence_score < 0.5:
+                    pass
+                else:
+                    x_min, y_min, x_max, y_max = box
+                    # Ensure the coordinates are integers
+                    x_min = int(x_min)
+                    y_min = int(y_min)
+                    x_max = int(x_max)
+                    y_max = int(y_max)
+
+                    # Calculate object dimensions in pixel units
+                    object_width_px = x_max - x_min
+                    object_length_px = y_max - y_min
+
+                    # Find the corresponding 3D coordinates of the bounding box
+                    x_min_world = x[y_min:y_max, x_min:x_max].min()
+                    x_max_world = x[y_min:y_max, x_min:x_max].max()
+                    y_min_world = y[y_min:y_max, x_min:x_max].min()
+                    y_max_world = y[y_min:y_max, x_min:x_max].max()
+                    z_min_world = z[y_min:y_max, x_min:x_max].min()
+                    z_max_world = z[y_min:y_max, x_min:x_max].max()
+
+                    # Calculate object dimensions in real-world units
+                    object_width_real = x_max_world - x_min_world
+                    object_length_real = y_max_world - y_min_world
+                    object_height_real = (z_max_world + z_min_world)/2
+
+                    # Calculate the center of the bounding box in pixel units
+                    center_pixel_x = int(x_min + object_width_px / 2)
+                    center_pixel_y = int(y_min + object_length_px / 2)
+
+                    # Extract the corresponding real-world coordinates from the camera_coordinates array
+                    center_real_x = x[center_pixel_y, center_pixel_x]
+                    center_real_y = y[center_pixel_y, center_pixel_x]
+                    center_real_z = z[center_pixel_y, center_pixel_x]
+
+                    print("Position of " + text_prompt + str(i) + ":", list(
+                        [np.around(center_real_x, 3), np.around(center_real_y, 3), np.around(center_real_z, 3)]))
+
+                    print("Dimensions:")
+                    print("Width:", np.around(object_width_real, 3))
+                    print("Length:", np.around(object_length_real, 3))
+                    print("Height of " + text_prompt + str(i) + ":", np.around(center_real_z, 3))
+
+                    # Calculating rotation in world frame
+                    bounding_cubes_orientation_width = np.arctan2(
+                        0, x_max - x_min)
+                    bounding_cubes_orientation_length = np.arctan2(
+                        y_max - y_min, 0)
+
+                    if object_width_real < object_length_real:
+                        print("Orientation along shorter side (width):",
+                              np.around(bounding_cubes_orientation_width, 3))
+                        print("Orientation along longer side (length):", np.around(
+                            bounding_cubes_orientation_length, 3), "\n")
+                    else:
+                        print("Orientation along shorter side (length):",
+                              np.around(bounding_cubes_orientation_length, 3))
+                        print("Orientation along longer side (width):", np.around(
+                            bounding_cubes_orientation_width, 3), "\n")
+
+                    # Add the mask and corresponding label to the dictionary
+                    mask_dict[text_prompt + str(i)] = mask_np
+
+    def execute_trajectory(self, trajectory):
+        print("Adding trajectory points to the environment")
+        print("Generated trajectory Executed")
+        pass
+
+    def open_gripper(self):
+        pass
+
+    def close_gripper(self):
+        pass

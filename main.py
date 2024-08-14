@@ -163,6 +163,7 @@ if __name__ == "__main__":
                 else:
 
                     logger.info(PROGRESS + "Generating ChatGPT output..." + ENDC)
+                    print('new_prompt new_prompt new_prompt:', new_prompt)
                     messages = models.get_chatgpt_output(args.language_model, new_prompt, messages, "user")
                     logger.info(OK + "Finished generating ChatGPT output!" + ENDC)
 

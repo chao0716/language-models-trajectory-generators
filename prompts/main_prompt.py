@@ -10,7 +10,7 @@ You are, however, able to call any of the following Python functions, if require
 2. execute_trajectory(trajectory: list) -> None: This function will execute the list of trajectory points on the robot arm end-effector, and will also not return anything.
 3. open_gripper() -> None: This function will open the gripper on the robot arm, and will also not return anything.
 4. close_gripper() -> None: This function will close the gripper on the robot arm, and will also not return anything.
-5. task_completed() -> None: Call this function only when the task has been completed. This function will also not return anything.
+5. check_task_completed() -> None: Call this function only when the task has been completed. This function will also not return anything.
 When calling any of the functions, make sure to stop generation after each function call and wait for it to be executed, before calling another function and continuing with your plan.
 
 ENVIRONMENT SET-UP:
@@ -22,6 +22,7 @@ The robot arm end-effector is currently positioned at [INSERT EE POSITION], with
 The robot arm is in a top-down set-up, with the end-effector facing down onto a tabletop. The end-effector is therefore able to rotate about the z-axis, from -pi to pi radians.
 The end-effector gripper has two fingers, and they are currently parallel to the x-axis.
 The gripper can only grasp objects along sides which are shorter than 0.08.
+If you want the gripper to grasp an object, the gripper must be at least smaller than the height of the object.
 Negative rotation values represent clockwise rotation, and positive rotation values represent anticlockwise rotation. The rotation values should be in radians.
 
 COLLISION AVOIDANCE:
