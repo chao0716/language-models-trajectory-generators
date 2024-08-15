@@ -5,6 +5,66 @@ import sys
 import base64
 from io import BytesIO
 from PIL import Image
+from gtts import gTTS
+import time, vlc, os
+import pyaudio
+import wave
+import keyboard
+
+def record_audio(output_filename):
+    # Audio settings
+    chunk = 1024  # Record in chunks of 1024 samples
+    sample_format = pyaudio.paInt16  # 16 bits per sample
+    channels = 1  # Mono channel
+    fs = 44100  # Record at 44100 samples per second``````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````
+
+    p = pyaudio.PyAudio()  # Create an interface to PortAudio
+
+    print("Press 'R' to start recording and release to stop...")
+
+    # Wait for the 'R' key to be pressed
+    keyboard.wait('R')
+
+    # Start recording
+    print("Recording...")
+    stream = p.open(format=sample_format,
+                    channels=channels,
+                    rate=fs,
+                    frames_per_buffer=chunk,
+                    input=True)
+    frames = []
+
+    # Continue recording while the 'R' key is pressed
+    while keyboard.is_pressed('R'):
+        data = stream.read(chunk)
+        frames.append(data)
+
+    # Stop recording
+    print("Stopped recording.")
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
+
+    # Save the recorded data as a WAV file
+    with wave.open(output_filename, 'wb') as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(p.get_sample_size(sample_format))
+        wf.setframerate(fs)
+        wf.writeframes(b''.join(frames))
+
+    print(f"Audio saved as {output_filename}")
+
+def text_to_audio_and_play(text):
+    tts = gTTS(text=text, lang='zh-cn')
+    audio_file = "temp_audio.mp3"
+    tts.save(audio_file)
+    player = vlc.MediaPlayer(audio_file)
+    # Play the sound file
+    player.play()
+    # Wait until the sound file finishes playing
+    while player.get_state() != vlc.State.Ended:
+        time.sleep(1)
+    os.remove(audio_file)
 
 def encode_image_to_base64(img_array):
     img_array = np.asarray(img_array, dtype=np.uint8)
