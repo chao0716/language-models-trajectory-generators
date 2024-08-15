@@ -24,6 +24,27 @@ class Realsense:
         print("[INFO] start streaming...")
         profile = self.__pipeline.start(config)
         self.__point_cloud = rs.pointcloud()
+        
+        
+        depth_sensor = profile.get_device().first_depth_sensor()
+        depth_scale = depth_sensor.get_depth_scale()
+        print("Depth Scale is: ", depth_scale)
+        
+        intr = (
+            profile.get_stream(rs.stream.depth)
+            .as_video_stream_profile()
+            .get_intrinsics()
+        )
+        print("width is: ", intr.width)
+        print("height is: ", intr.height)
+        print("ppx is: ", intr.ppx)
+        print("ppy is: ", intr.ppy)
+        print("fx is: ", intr.fx)
+        print("fy is: ", intr.fy)
+        HFOV = math.degrees(2 * math.atan(intr.width / (intr.fx + intr.fy)))
+        print("HFOV is", HFOV)
+        VFOV = math.degrees(2 * math.atan(intr.height / (intr.fx + intr.fy)))
+        print("VFOV is", VFOV)
 
     def get_aligned_verts(self):
 
