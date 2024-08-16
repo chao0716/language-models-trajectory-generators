@@ -1,13 +1,10 @@
 import openai
 from lang_sam import LangSAM
-import numpy as np
 import traceback
 from io import StringIO
 from contextlib import redirect_stdout
 from prompts.main_prompt import MAIN_PROMPT
 from prompts.print_output_prompt import PRINT_OUTPUT_PROMPT
-import config
-import sys
 from api import API
 from utils import get_chatgpt_output, render_camera_in_sim, encode_image_to_base64, build_sim, record_audio, audio_to_text
 from prompts.error_correction_prompt import ERROR_CORRECTION_PROMPT
@@ -15,18 +12,18 @@ from prompts.task_summary_prompt import TASK_SUMMARY_PROMPT
 from prompts.task_failure_prompt import TASK_FAILURE_PROMPT
 from prompts.command_from_audio import TASK_COMMAND_FROM_AUDIO
 import os
-import requests
 import argparse
 import re
 if __name__ == "__main__":
-
+    
+    ee_start_position = [0.0, 0, 0.2]
     openai.api_key = os.getenv("OPENAI_API_KEY")
     # Parse args
     parser = argparse.ArgumentParser(description="Main Program.")
     parser.add_argument("-lm", "--language_model", choices=["gpt-4o"], default="gpt-4o", help="select language model")
     parser.add_argument("-m", "--mode", choices=["text", "voice"], default="text", help="select mode to run")
-    parser.add_argument("-s", "--speaker", action = 'store_true', help="if let robot to speak")
     args = parser.parse_args()
+    LangSAM_model = LangSAM()
     #%%
     build_sim()
     initial_rgb_img, _ = render_camera_in_sim()
@@ -50,9 +47,8 @@ if __name__ == "__main__":
         else:
             print("No command found in the output.")
 
-    LangSAM_model = LangSAM()
+
     api = API(LangSAM_model, command, args.language_model, initial_img_base64)
-    
     detect_object = api.detect_object
     execute_trajectory = api.execute_trajectory
     open_gripper = api.open_gripper
@@ -63,7 +59,7 @@ if __name__ == "__main__":
     #%%
     messages_infer = []
     error = False
-    prompt_infer = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(config.ee_start_position)).replace("[INSERT TASK]", command)
+    prompt_infer = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(ee_start_position)).replace("[INSERT TASK]", command)
     messages_infer = get_chatgpt_output(args.language_model, prompt_infer, messages_infer, "system")
     #%%
     while not completed_task:
@@ -112,7 +108,7 @@ if __name__ == "__main__":
                 messages_infer = get_chatgpt_output(args.language_model, prompt_infer, messages_infer, "user")
     
                 #"RETRYING TASK..."
-                prompt_infer = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(config.ee_start_position)).replace("[INSERT TASK]", command)
+                prompt_infer = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(ee_start_position)).replace("[INSERT TASK]", command)
                 prompt_infer += "\n"
                 prompt_infer += TASK_FAILURE_PROMPT.replace("[INSERT TASK SUMMARY]", messages_infer[-1]["content"])
     
