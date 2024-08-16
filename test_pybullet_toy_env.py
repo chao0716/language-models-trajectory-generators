@@ -124,5 +124,23 @@ if __name__ == "__main__":
             else:
                 # if everything is fine and task is not completed
                 messages_infer = get_chatgpt_output(args.language_model, prompt_infer, messages_infer, "user")
-                
-#%%
+#%%       
+    # if args.mode == "text":
+    #     command = input("Enter a command: ")
+    # elif args.mode == "voice":
+    #     audio_name = "output.mp3"
+    #     record_audio(audio_name)
+    #     converted_text = audio_to_text(audio_name)
+    #     print("Converted Text:", converted_text)
+    #     messages_voice_to_command = []
+    #     prompt_voice_to_command = TASK_COMMAND_FROM_AUDIO.replace("[INSERT AUDIO TEXT]", converted_text)
+    #     messages_voice_to_command = get_chatgpt_output(args.language_model, prompt_voice_to_command, messages_voice_to_command, "system")
+    #     # Extracted Command from Voice text
+    #     command_match = re.search(r'<<command>>(.*?)</command>>', messages_voice_to_command[-1]["content"])
+    #     if command_match:
+    #         command = command_match.group(1)
+    #         print("Extracted Task Command:", command)
+    #     else:
+    #         print("No command found in the output.")
+    # api.command = command
+    # api.completed_task = False 
