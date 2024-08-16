@@ -1,5 +1,4 @@
-import pybullet as p
-import pybullet_data
+import openai
 from lang_sam import LangSAM
 import numpy as np
 import traceback
@@ -10,116 +9,124 @@ from prompts.print_output_prompt import PRINT_OUTPUT_PROMPT
 import config
 import sys
 from api import API
-from utils import get_chatgpt_output, render_camera_in_sim, encode_image_to_base64
+from utils import get_chatgpt_output, render_camera_in_sim, encode_image_to_base64, build_sim, record_audio, audio_to_text
 from prompts.error_correction_prompt import ERROR_CORRECTION_PROMPT
 from prompts.task_summary_prompt import TASK_SUMMARY_PROMPT
 from prompts.task_failure_prompt import TASK_FAILURE_PROMPT
+from prompts.command_from_audio import TASK_COMMAND_FROM_AUDIO
 import os
 import requests
-# Initialize PyBullet simulation
-p.connect(p.GUI)
-p.setAdditionalSearchPath(pybullet_data.getDataPath())
-p.resetSimulation()
+import argparse
+import re
+if __name__ == "__main__":
 
-# Set gravity
-p.setGravity(0, 0, -9.81)
-
-# Load plane and set the environment
-plane_id = p.loadURDF("plane.urdf")
-
-# Create two blocks with different colors
-block1_id = p.loadURDF("cube.urdf", basePosition=[0, 0, 0], globalScaling=0.075)
-block2_id = p.loadURDF("cube.urdf", basePosition=[0.15, 0, 0], globalScaling=0.075)
-
-# Set block colors
-p.changeVisualShape(block1_id, -1, rgbaColor=[1, 0, 0, 1])  # Red
-p.changeVisualShape(block2_id, -1, rgbaColor=[0, 0, 1, 1])  # Blue
-
-initial_rgb_img, _ = render_camera_in_sim()
-initial_img_base64 = encode_image_to_base64(initial_rgb_img)
-
-# p.disconnect()
-#%%
-command = 'put the blue block on the top of red block'
-language_model = 'gpt-4o'
-LangSAM_model = LangSAM()
-api = API(LangSAM_model, command, language_model, initial_img_base64)
-
-detect_object = api.detect_object
-execute_trajectory = api.execute_trajectory
-open_gripper = api.open_gripper
-close_gripper = api.close_gripper
-completed_task = api.completed_task
-failed_task = api.failed_task
-check_task_completed = api.check_task_completed
-#%%
-messages = []
-error = False
-new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(config.ee_start_position)).replace("[INSERT TASK]", command)
-messages = get_chatgpt_output(language_model, new_prompt, messages, "system")
-#%%
-while not completed_task:
-#%%
-    new_prompt = ""
-
-    if len(messages[-1]["content"].split("```python")) > 1:
-
-        code_block = messages[-1]["content"].split("```python")
-
-        block_number = 0
-
-        for block in code_block:
-            if len(block.split("```")) > 1:
-                code = block.split("```")[0]
-                block_number += 1
-                try:
-                    f = StringIO()
-                    with redirect_stdout(f):
-                        exec(code)
-                except Exception:
-                    error_message = traceback.format_exc()
-                    new_prompt += ERROR_CORRECTION_PROMPT.replace("[INSERT BLOCK NUMBER]", str(block_number)).replace("[INSERT ERROR MESSAGE]", error_message)
-                    new_prompt += "\n"
-                    error = True
-                else:
-                    s = f.getvalue()
-                    error = False
-                    if s != "" and len(s) < 2000:
-                        new_prompt += PRINT_OUTPUT_PROMPT.replace("[INSERT PRINT STATEMENT OUTPUT]", s)
-                        new_prompt += "\n"
-                        error = True
-
-    if error:
-        completed_task = False
-        failed_task = False
-    
-    if not completed_task:
-
-        if failed_task:
-
-            #FAILED TASK! Generating summary of the task execution attempt
-            new_prompt += TASK_SUMMARY_PROMPT
-            new_prompt += "\n"
-
-            #Generating ChatGPT output..."
-            messages = get_chatgpt_output(language_model, new_prompt, messages, "user")
-
-            #"RETRYING TASK..."
-            new_prompt = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(config.ee_start_position)).replace("[INSERT TASK]", command)
-            new_prompt += "\n"
-            new_prompt += TASK_FAILURE_PROMPT.replace("[INSERT TASK SUMMARY]", messages[-1]["content"])
-
-            messages = []
-
-            error = False
-
-            #Generating ChatGPT output..." 
-            messages = get_chatgpt_output(language_model, new_prompt, messages, "system")
-
-            failed_task = False
-
+    openai.api_key = os.getenv("OPENAI_API_KEY")
+    # Parse args
+    parser = argparse.ArgumentParser(description="Main Program.")
+    parser.add_argument("-lm", "--language_model", choices=["gpt-4o"], default="gpt-4o", help="select language model")
+    parser.add_argument("-m", "--mode", choices=["text", "voice"], default="text", help="select mode to run")
+    parser.add_argument("-s", "--speaker", action = 'store_true', help="if let robot to speak")
+    args = parser.parse_args()
+    #%%
+    build_sim()
+    initial_rgb_img, _ = render_camera_in_sim()
+    initial_img_base64 = encode_image_to_base64(initial_rgb_img)
+    #%%
+    if args.mode == "text":
+        command = input("Enter a command: ")
+    elif args.mode == "voice":
+        audio_name = "output.mp3"
+        record_audio(audio_name)
+        converted_text = audio_to_text(audio_name)
+        print("Converted Text:", converted_text)
+        messages_voice_to_command = []
+        prompt_voice_to_command = TASK_COMMAND_FROM_AUDIO.replace("[INSERT AUDIO TEXT]", converted_text)
+        messages_voice_to_command = get_chatgpt_output(args.language_model, prompt_voice_to_command, messages_voice_to_command, "system")
+        # Extracted Command from Voice text
+        command_match = re.search(r'<<command>>(.*?)</command>>', messages_voice_to_command[-1]["content"])
+        if command_match:
+            command = command_match.group(1)
+            print("Extracted Task Command:", command)
         else:
-            # if everything is fine and task is not completed
-            messages = get_chatgpt_output(language_model, new_prompt, messages, "user")
-            
+            print("No command found in the output.")
+
+    LangSAM_model = LangSAM()
+    api = API(LangSAM_model, command, args.language_model, initial_img_base64)
+    
+    detect_object = api.detect_object
+    execute_trajectory = api.execute_trajectory
+    open_gripper = api.open_gripper
+    close_gripper = api.close_gripper
+    completed_task = api.completed_task
+    failed_task = api.failed_task
+    check_task_completed = api.check_task_completed
+    #%%
+    messages_infer = []
+    error = False
+    prompt_infer = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(config.ee_start_position)).replace("[INSERT TASK]", command)
+    messages_infer = get_chatgpt_output(args.language_model, prompt_infer, messages_infer, "system")
+    #%%
+    while not completed_task:
+        prompt_infer = ""
+    
+        if len(messages_infer[-1]["content"].split("```python")) > 1:
+    
+            code_block = messages_infer[-1]["content"].split("```python")
+    
+            block_number = 0
+    
+            for block in code_block:
+                if len(block.split("```")) > 1:
+                    code = block.split("```")[0]
+                    block_number += 1
+                    try:
+                        f = StringIO()
+                        with redirect_stdout(f):
+                            exec(code)
+                    except Exception:
+                        error_message = traceback.format_exc()
+                        prompt_infer += ERROR_CORRECTION_PROMPT.replace("[INSERT BLOCK NUMBER]", str(block_number)).replace("[INSERT ERROR MESSAGE]", error_message)
+                        prompt_infer += "\n"
+                        error = True
+                    else:
+                        s = f.getvalue()
+                        error = False
+                        if s != "" and len(s) < 2000:
+                            prompt_infer += PRINT_OUTPUT_PROMPT.replace("[INSERT PRINT STATEMENT OUTPUT]", s)
+                            prompt_infer += "\n"
+                            error = True
+    
+        if error:
+            completed_task = False
+            failed_task = False
+        
+        if not completed_task:
+    
+            if failed_task:
+    
+                #FAILED TASK! Generating summary of the task execution attempt
+                prompt_infer += TASK_SUMMARY_PROMPT
+                prompt_infer += "\n"
+    
+                #Generating ChatGPT output..."
+                messages_infer = get_chatgpt_output(args.language_model, prompt_infer, messages_infer, "user")
+    
+                #"RETRYING TASK..."
+                prompt_infer = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(config.ee_start_position)).replace("[INSERT TASK]", command)
+                prompt_infer += "\n"
+                prompt_infer += TASK_FAILURE_PROMPT.replace("[INSERT TASK SUMMARY]", messages_infer[-1]["content"])
+    
+                messages_infer = []
+    
+                error = False
+    
+                #Generating ChatGPT output..." 
+                messages_infer = get_chatgpt_output(args.language_model, prompt_infer, messages_infer, "system")
+    
+                failed_task = False
+    
+            else:
+                # if everything is fine and task is not completed
+                messages_infer = get_chatgpt_output(args.language_model, prompt_infer, messages_infer, "user")
+                
 #%%

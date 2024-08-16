@@ -10,13 +10,24 @@ import time, vlc, os
 import pyaudio
 import wave
 import keyboard
+import pybullet as p
+import pybullet_data
+
+def audio_to_text(file):
+    client = OpenAI()
+    audio_file= open(file, "rb")
+    translation = client.audio.translations.create(
+      model="whisper-1", 
+      file=audio_file
+    )
+    return translation.text
 
 def record_audio(output_filename):
     # Audio settings
     chunk = 1024  # Record in chunks of 1024 samples
     sample_format = pyaudio.paInt16  # 16 bits per sample
     channels = 1  # Mono channel
-    fs = 44100  # Record at 44100 samples per second``````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````
+    fs = 44100  # Record at 44100 samples per second
 
     p = pyaudio.PyAudio()  # Create an interface to PortAudio
 
@@ -164,3 +175,37 @@ def render_camera_in_sim():
     camera_coordinates = np.stack((X, Y, Z), axis=-1)
 
     return rgb_image, camera_coordinates
+
+def build_sim():
+    # Initialize PyBullet simulation
+    p.connect(p.GUI)
+    p.setAdditionalSearchPath(pybullet_data.getDataPath())
+    p.resetSimulation()
+    
+    # Set gravity
+    p.setGravity(0, 0, -9.81)
+    
+    # Load plane and set the environment
+    plane_id = p.loadURDF("plane.urdf")
+    
+    # Create two cuboids with different colors (3x6x3 cm)
+    block1_collision_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.03, 0.015, 0.015])
+    block2_collision_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=[0.03, 0.015, 0.015])
+    
+    block1_visual_shape = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.03, 0.015, 0.015], rgbaColor=[1, 0, 0, 1])  # Red
+    block2_visual_shape = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.03, 0.015, 0.015], rgbaColor=[0, 0, 1, 1])  # Blue
+    
+    # Create block1 parallel to X-axis (no rotation needed)
+    block1_id = p.createMultiBody(baseMass=1.0, 
+                                  baseCollisionShapeIndex=block1_collision_shape, 
+                                  baseVisualShapeIndex=block1_visual_shape, 
+                                  basePosition=[0, 0, 0],
+                                  baseOrientation=[0, 0, 0, 1])  # No rotation, default orientation
+    
+    # Create block2 parallel to Y-axis (90 degrees rotation around Z-axis)
+    block2_orientation = p.getQuaternionFromEuler([0, 0, np.pi/2])  # Rotate 90 degrees around Z-axis
+    block2_id = p.createMultiBody(baseMass=1.0, 
+                                  baseCollisionShapeIndex=block2_collision_shape, 
+                                  baseVisualShapeIndex=block2_visual_shape, 
+                                  basePosition=[0.15, 0, 0],
+                                  baseOrientation=block2_orientation)

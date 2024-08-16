@@ -190,13 +190,13 @@ class API:
                         y_max - y_min, 0)
 
                     if object_width_real < object_length_real:
-                        print("Orientation along shorter side (width):",
-                              np.around(bounding_cubes_orientation_width, 3))
+                        # print("Orientation along shorter side (width):",
+                        #       np.around(bounding_cubes_orientation_width, 3))
                         print("Orientation along longer side (length):", np.around(
                             bounding_cubes_orientation_length, 3), "\n")
                     else:
-                        print("Orientation along shorter side (length):",
-                              np.around(bounding_cubes_orientation_length, 3))
+                        # print("Orientation along shorter side (length):",
+                        #       np.around(bounding_cubes_orientation_length, 3))
                         print("Orientation along longer side (width):", np.around(
                             bounding_cubes_orientation_width, 3), "\n")
 
@@ -204,8 +204,9 @@ class API:
                     mask_dict[text_prompt + str(i)] = mask_np
 
     def execute_trajectory(self, trajectory):
-        print("Adding trajectory points to the environment")
-        print("Generated trajectory Executed")
+        # print("Adding trajectory points to the environment")
+        # print("Generated trajectory Executed")
+        print('trajectory:', trajectory)
         pass
 
     def open_gripper(self):
