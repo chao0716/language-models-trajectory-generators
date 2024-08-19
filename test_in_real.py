@@ -15,6 +15,11 @@ import os
 import argparse
 import re
 from class_kinowa import Kinowa, Robot
+from class_camera import Realsense
+import cv2
+from PIL import Image
+import matplotlib.pyplot as plt
+import numpy as np
 if __name__ == "__main__":
     
     ee_start_position = [0.0, 0, 0.2]
@@ -25,10 +30,20 @@ if __name__ == "__main__":
     parser.add_argument("-m", "--mode", choices=["text", "voice"], default="text", help="select mode to run")
     args = parser.parse_args()
     LangSAM_model = LangSAM()
-    #%%
-    build_sim()
-    initial_rgb_img, _ = render_camera_in_sim()
+
+    interface = Kinowa(ip="192.168.1.10")
+    robot = Robot(interface)
+    
+    robot.gripper_open()    
+    robot.gripper_close()
+    robot.gripper_open()
+    robot.go_safe_place()
+    robot.go_safe_place()
+
+    initial_rgb_img, depth_camera_coordinates = render_camera_in_sim()
     initial_img_base64 = encode_image_to_base64(initial_rgb_img)
+    cv2.imwrite('initial_rgb_img.png', initial_rgb_img)
+    
     #%%
     if args.mode == "text":
         command = input("Enter a command: ")
@@ -49,7 +64,7 @@ if __name__ == "__main__":
             print("No command found in the output.")
 
 
-    api = API(LangSAM_model, command, args.language_model, initial_img_base64)
+    api = API(LangSAM_model, command, args.language_model, initial_rgb_img, depth_camera_coordinates, initial_img_base64, robot)
     detect_object = api.detect_object
     execute_trajectory = api.execute_trajectory
     open_gripper = api.open_gripper
@@ -64,6 +79,7 @@ if __name__ == "__main__":
     messages_infer = get_chatgpt_output(args.language_model, prompt_infer, messages_infer, "system")
     #%%
     while not completed_task:
+#%%
         prompt_infer = ""
     
         if len(messages_infer[-1]["content"].split("```python")) > 1:

@@ -22,33 +22,9 @@ class Kinowa:
         self.__username = username
         self.__password = password
         self.__connect_robot()
-        
-        # Gripper control
-        self.base_command = BaseCyclic_pb2.Command()
-        self.base_command.frame_id = 0
-        self.base_command.interconnect.command_id.identifier = 0
-        self.base_command.interconnect.gripper_command.command_id.identifier = 0
-        self.motorcmd = self.base_command.interconnect.gripper_command.motor_cmd.add()
-        base_feedback = self.base_cyclic.RefreshFeedback()
-        self.motorcmd.position = base_feedback.interconnect.gripper_feedback.motor[
-            0
-        ].position
-        self.motorcmd.velocity = 0
-        self.motorcmd.force = 100
 
     def __connect_robot(self):
         try:
-            self.udp_transport = UDPTransport()
-            self.udp_transport.connect(self.__ip, 10001)
-            self.router_real_time = RouterClient(self.udp_transport, lambda k: None)
-            self.session_manager_rt = SessionClient(self.router_real_time)
-
-            session_info = Session_pb2.CreateSessionInfo()
-            session_info.username = self.__username
-            session_info.password = self.__password
-            session_info.session_inactivity_timeout = 60000  # (milliseconds)
-            session_info.connection_inactivity_timeout = 2000  # (milliseconds)
-            self.session_manager_rt.CreateSession(session_info)
 
             # Establish a connection with the robot
             self.transport = TCPTransport()
@@ -64,12 +40,11 @@ class Kinowa:
             self.session_manager.CreateSession(session_info)
 
             self.base = BaseClient(self.router)
-            self.base_cyclic = BaseCyclicClient(self.router_real_time)
             print("Connected to the robot successfully")
         except Exception as e:
             print(f"Failed to connect to the robot: {e}")
 
-    def move(self, pose, blocking=False):
+    def move(self, pose, blocking=True):
         rpy = t3d.euler.mat2euler(pose[:3, :3], "sxyz")
         xyz = pose[:3, 3]
         command = Base_pb2.ConstrainedPose()
@@ -114,16 +89,27 @@ class Kinowa:
         )
         return pose
     
-    def control_gripper(self, position):
-        try:
-            self.motorcmd.position = position
-            self.base_cyclic.Refresh(self.base_command)
+    def control_gripper(self, position, blocking = True):
         
-            time.sleep(1.0)
-            print("Gripper command executed successfully.")
-        except Exception as e:
-            print(f"An error occurred while controlling the gripper: {e}")
-
+        # Create the gripper command request
+        gripper_command = Base_pb2.GripperCommand()
+        gripper_command.mode = Base_pb2.GRIPPER_POSITION
+        finger = gripper_command.gripper.finger.add()
+        finger.finger_identifier = 1
+        finger.value = position  # The API uses a scale of 0-100
+ 
+        notification_handle = None
+        if blocking:
+            notification_handle = self.base.OnNotificationActionTopic(self.__action_notification_callback, Base_pb2.NotificationOptions())
+        
+        # Send the gripper command and wait for the result
+        self.base.SendGripperCommand(gripper_command)
+        
+        if blocking:
+            self.__action_done.wait()
+            self.base.Unsubscribe(notification_handle)
+            self.__action_done.clear()
+            
     def close(self):
         try:
             self.session_manager.CloseSession()
@@ -131,104 +117,26 @@ class Kinowa:
             print("Disconnected from the robot")
         except Exception as e:
             print(f"Failed to disconnect from the robot: {e}")
-
-
-class Mock:
-    def __init__(self):
-        self.__pose = np.eye(4)
-
-    def __plot_pose(self, pose, axis_length=0.3, workspace_limit=1.0):
-        # Validate the input
-        if pose.shape != (4, 4):
-            raise ValueError("The transformation matrix must be a 4x4 matrix.")
-
-        # Extract rotation matrix and translation vector
-        rotation_matrix = pose[:3, :3]
-        translation_vector = pose[:3, 3]
-
-        # Create figure and 3D axes
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection="3d")
-
-        # Plot the origin
-        ax.scatter(
-            translation_vector[0],
-            translation_vector[1],
-            translation_vector[2],
-            color="k",
-        )
-
-        # Plot the x, y, and z axes
-        x_axis = rotation_matrix[:, 0] * axis_length
-        y_axis = rotation_matrix[:, 1] * axis_length
-        z_axis = rotation_matrix[:, 2] * axis_length
-
-        # Draw the axes
-        ax.quiver(
-            translation_vector[0],
-            translation_vector[1],
-            translation_vector[2],
-            x_axis[0],
-            x_axis[1],
-            x_axis[2],
-            color="r",
-            label="X axis",
-        )
-        ax.quiver(
-            translation_vector[0],
-            translation_vector[1],
-            translation_vector[2],
-            y_axis[0],
-            y_axis[1],
-            y_axis[2],
-            color="g",
-            label="Y axis",
-        )
-        ax.quiver(
-            translation_vector[0],
-            translation_vector[1],
-            translation_vector[2],
-            z_axis[0],
-            z_axis[1],
-            z_axis[2],
-            color="b",
-            label="Z axis",
-        )
-
-        # Set labels and limits
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_zlabel("Z")
-        ax.set_xlim([-workspace_limit, workspace_limit])
-        ax.set_ylim([-workspace_limit, workspace_limit])
-        ax.set_zlim([0, 2 * workspace_limit])
-
-        ax.legend()
-        # save plot
-        plt.savefig("pose.png")
-
-    def move(self, pose, blocking=False):
-        self.__pose = pose
-        if blocking:
-            time.sleep(1)
-            self.__plot_pose(pose)
-        else:
-            self.__plot_pose(pose)
-
-    def get_pose(self):
-        return self.__pose
-
-    def close(self):
-        pass
-
-
+            
 class Robot:
     def __init__(self, robot):
         self.robot = robot
 
-    def go_home(self, blocking=False):
+    def go_home(self, blocking=True):
         pose = t3d.affines.compose(
-            [0.35, 0, 0.2],
+            [0.525, 0.044, 0.2],
+            # [0.525, 0.044, 0.0225],
+            t3d.euler.euler2mat(
+                math.radians(180), math.radians(0), math.radians(0), "sxyz"
+            ),
+            [1, 1, 1],
+        )
+        
+        self.robot.move(pose, blocking)
+        
+    def go_safe_place(self, blocking=True):
+        pose = t3d.affines.compose(
+            [0.25, 0.044, 0.2],
             t3d.euler.euler2mat(
                 math.radians(180), math.radians(0), math.radians(0), "sxyz"
             ),
@@ -236,13 +144,13 @@ class Robot:
         )
         self.robot.move(pose, blocking)
 
-    def move(self, pose, blocking=False):
+    def move(self, pose, blocking=True):
         self.robot.move(pose, blocking)
 
     def get_pose(self):
         return self.robot.get_pose()
 
-    def move_tool_xyz(self, x=0, y=0, z=0, blocking=False):
+    def move_tool_xyz(self, x=0, y=0, z=0, blocking=True):
         pose = self.robot.get_pose()
         tool_pose_change = np.eye(4)
         tool_pose_change[0, 3] = x
@@ -251,7 +159,7 @@ class Robot:
         pose = pose @ tool_pose_change
         self.robot.move(pose, blocking=blocking)
 
-    def move_tool_ypr(self, yaw=0, pitch=0, roll=0, blocking=False):
+    def move_tool_ypr(self, yaw=0, pitch=0, roll=0, blocking=True):
         pose = self.robot.get_pose()
         change = t3d.affines.compose(
             [0, 0, 0],
@@ -263,7 +171,7 @@ class Robot:
         pose = pose @ change
         self.robot.move(pose, blocking=blocking)
 
-    def move_tool_rpy(self, roll=0, pitch=0, yaw=0, blocking=False):
+    def move_tool_rpy(self, roll=0, pitch=0, yaw=0, blocking=True):
         pose = self.robot.get_pose()
         change = t3d.affines.compose(
             [0, 0, 0],
@@ -275,7 +183,7 @@ class Robot:
         pose = pose @ change
         self.robot.move(pose, blocking=blocking)
 
-    def move_tool_xyzrpy(self, x=0, y=0, z=0, roll=0, pitch=0, yaw=0, blocking=False):
+    def move_tool_xyzrpy(self, x=0, y=0, z=0, roll=0, pitch=0, yaw=0, blocking=True):
         pose = self.robot.get_pose()
         change = t3d.affines.compose(
             [x, y, z],
@@ -286,33 +194,46 @@ class Robot:
         )
         pose = pose @ change
         self.robot.move(pose, blocking=blocking)
+        
+    def gripper_open(self):
+        self.robot.control_gripper(0)
 
+    def gripper_close(self):
+        self.robot.control_gripper(1)
+        
+#%%       
+if __name__ == "__main__":
 
-def main():
     interface = Kinowa(ip="192.168.1.10")
-    # interface = Mock()
     robot = Robot(interface)
     
-    # interface.control_gripper(1.0)
-    
-    robot.go_home(blocking=True)
-    
-    # print('up')
-    # robot.move_tool_xyzrpy(z=-0.1, blocking=True)
-    # print('down')
-   #  robot.move_tool_xyzrpy(z=0.1, blocking=True)
+    robot.gripper_open()    
+    robot.gripper_close()
+    robot.gripper_open()
+  
+    robot.go_safe_place()
+    robot.go_safe_place()
+#%%
+    robot.move_tool_xyzrpy(yaw=90)
+#%%
+#     print('up')
+#     robot.move_tool_xyzrpy(z=-0.15)
+#     print('down')
+#     robot.move_tool_xyzrpy(z=0.15)
+#     #%%
+#     print('back')
+#     robot.move_tool_xyzrpy(x=-0.05)
+#     print('front')
+#     robot.move_tool_xyzrpy(x=0.05)    
+#     #%%
+#     print('right')
+#     robot.move_tool_xyzrpy(y=-0.05)
+#     print('left')
+#     robot.move_tool_xyzrpy(y=0.05)      
+# #%%
+#     robot.go_home()
+#     robot.go_home()
+# #%%
+#     interface.close()
 
-    # robot.move_tool_xyzrpy(0.9, 0.1, 0.9, 45)
-    # robot.move_tool_xyzrpy(roll=45)
-    # robot.move_tool_xyzrpy(pitch=45)
-    # print(robot.get_pose())
-    # print(pose)
-    # robot.move(pose)
-    # robot.go_home()
-    # time.sleep(3.3)
 
-    interface.close()
-
-
-if __name__ == "__main__":
-    main()

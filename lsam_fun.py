@@ -5,7 +5,8 @@ import requests
 from PIL import Image
 from io import BytesIO
 from lang_sam import LangSAM
-
+from utils import render_camera_in_sim
+import cv2
 def save_mask(mask_np, filename):
     mask_image = Image.fromarray((mask_np * 255).astype(np.uint8))
     mask_image.save(filename)
@@ -61,64 +62,99 @@ def print_logits(logits):
     print("\nConfidence:")
     for i, logit in enumerate(logits):
         print(f"Logit {i+1}: {logit}")
-        
-def detect_object(self, text_prompt, rgb_image):
+ #%% 
+if __name__ == "__main__":      
     model = LangSAM()
-    rgb_image = Image.fromarray(rgb_image.astype('uint8'), 'RGB')
-    masks, boxes, phrases, logits = model.predict(rgb_image, text_prompt)
+    text_prompt=  "yellow block"
+    
+    rgb_img, depth_camera_coordinates = render_camera_in_sim()
+    rgb_img = Image.fromarray(rgb_img.astype('uint8'), 'RGB')
+    
+    fig, ax = plt.subplots()
+    ax.imshow(rgb_img)
+    ax.axis('off')
+    plt.show()
+    
+    x = depth_camera_coordinates[:, :, 0]
+    y = depth_camera_coordinates[:, :, 1]
+    z = depth_camera_coordinates[:, :, 2]
+    
+    masks, boxes, phrases, logits = model.predict(
+        rgb_img, text_prompt)
+    # Initialize an empty dictionary
+    mask_dict = {}
+    
     if len(masks) == 0:
-        print(f"No objects of the '{text_prompt}' prompt detected in the image.")
+        print(
+            f"No objects of the '{text_prompt}' prompt detected in the image.")
     else:
         # Convert masks to numpy arrays
         masks_np = [mask.squeeze().cpu().numpy() for mask in masks]
     
-        # Display the original image and masks side by side
-        display_image_with_masks(rgb_image, masks_np)
+        for i, (mask_np, box, logit) in enumerate(zip(masks_np, boxes, logits)):
+            # Convert logit to a scalar before rounding
+            confidence_score = round(logit.item(), 2)
+            # Change confidence_score if wrong object is detected
+            if confidence_score < 0.5:
+                pass
+            else:
+                x_min, y_min, x_max, y_max = box
+                # Ensure the coordinates are integers
+                x_min = int(x_min)
+                y_min = int(y_min)
+                x_max = int(x_max)
+                y_max = int(y_max)
     
-        # Display the image with bounding boxes and confidence scores
-        display_image_with_boxes(rgb_image, boxes, logits)
+                # Calculate object dimensions in pixel units
+                object_width_px = x_max - x_min
+                object_length_px = y_max - y_min
     
-        # Print the bounding boxes, phrases, and logits
-        print_bounding_boxes(boxes)
-        print_detected_phrases(phrases)
-        print_logits(logits)
-
-#         print("Position of " + segmentation_texts[i] + ":", list(np.around(bounding_cube_world_coordinates[4], 3)))
-
-#         print("Dimensions:")
-#         print("Width:", object_width)
-#         print("Length:", object_length)
-#         print("Height:", object_height)
-
-#         if object_width < object_length:
-#             print("Orientation along shorter side (width):", np.around(bounding_cubes_orientations[i][0], 3))
-#             print("Orientation along longer side (length):", np.around(bounding_cubes_orientations[i][1], 3), "\n")
-#         else:
-#             print("Orientation along shorter side (length):", np.around(bounding_cubes_orientations[i][1], 3))
-#             print("Orientation along longer side (width):", np.around(bounding_cubes_orientations[i][0], 3), "\n")
-#%%
-def main():
-    model = LangSAM()
-    image_pil = Image.open("image.png").convert("RGB")
-    text_prompt = "block with blue color"
-    masks, boxes, phrases, logits = model.predict(image_pil, text_prompt)
+                # Find the corresponding 3D coordinates of the bounding box
+                x_min_world = x[y_min:y_max, x_min:x_max].min()
+                x_max_world = x[y_min:y_max, x_min:x_max].max()
+                y_min_world = y[y_min:y_max, x_min:x_max].min()
+                y_max_world = y[y_min:y_max, x_min:x_max].max()
+                z_min_world = z[y_min:y_max, x_min:x_max].min()
+                z_max_world = z[y_min:y_max, x_min:x_max].max()
     
-    if len(masks) == 0:
-        print(f"No objects of the '{text_prompt}' prompt detected in the image.")
-    else:
-        # Convert masks to numpy arrays
-        masks_np = [mask.squeeze().cpu().numpy() for mask in masks]
+                # Calculate object dimensions in real-world units
+                object_width_real = x_max_world - x_min_world
+                object_length_real = y_max_world - y_min_world
+                object_height_real = (z_max_world + z_min_world)/2
     
-        # Display the original image and masks side by side
-        display_image_with_masks(image_pil, masks_np)
+                # Calculate the center of the bounding box in pixel units
+                center_pixel_x = int(x_min + object_width_px / 2)
+                center_pixel_y = int(y_min + object_length_px / 2)
     
-        # Display the image with bounding boxes and confidence scores
-        display_image_with_boxes(image_pil, boxes, logits)
+                # Extract the corresponding real-world coordinates from the camera_coordinates array
+                center_real_x = x[center_pixel_y, center_pixel_x]
+                center_real_y = y[center_pixel_y, center_pixel_x]
+                center_real_z = z[center_pixel_y, center_pixel_x]
     
-        # Print the bounding boxes, phrases, and logits
-        print_bounding_boxes(boxes)
-        print_detected_phrases(phrases)
-        print_logits(logits)
-        
-if __name__ == "__main__":
-    main()
+                print("Position of " + text_prompt + str(i) + ":", list(
+                    [np.around(center_real_x, 3), np.around(center_real_y, 3), np.around(center_real_z, 3)]))
+    
+                print("Dimensions:")
+                print("Width:", np.around(object_width_real, 3))
+                print("Length:", np.around(object_length_real, 3))
+                print("Height of " + text_prompt + str(i) + ":", np.around(center_real_z, 3))
+    
+                # Calculating rotation in world frame
+                bounding_cubes_orientation_width = np.arctan2(
+                    0, x_max - x_min)
+                bounding_cubes_orientation_length = np.arctan2(
+                    y_max - y_min, 0)
+    
+                if object_width_real < object_length_real:
+                    # print("Orientation along shorter side (width):",
+                    #       np.around(bounding_cubes_orientation_width, 3))
+                    print("Orientation along longer side (length):", np.around(
+                        bounding_cubes_orientation_length, 3), "\n")
+                else:
+                    # print("Orientation along shorter side (length):",
+                    #       np.around(bounding_cubes_orientation_length, 3))
+                    print("Orientation along longer side (width):", np.around(
+                        bounding_cubes_orientation_width, 3), "\n")
+    
+                # Add the mask and corresponding label to the dictionary
+                mask_dict[text_prompt + str(i)] = mask_np

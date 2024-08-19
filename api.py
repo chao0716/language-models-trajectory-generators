@@ -3,12 +3,13 @@ import numpy as np
 from PIL import Image
 from utils import get_chatgpt_output, render_camera_in_sim, encode_image_to_base64
 import os
+import math
 import requests
 
 
 class API:
 
-    def __init__(self, langsam_model, command, language_model, initial_img_base64):
+    def __init__(self, langsam_model, command, language_model, initial_rgb_img, depth_camera_coordinates, initial_img_base64, robot):
 
         self.langsam_model = langsam_model
         self.completed_task = False
@@ -16,6 +17,9 @@ class API:
         self.command = command
         self.language_model = language_model
         self.initial_img_base64 = initial_img_base64
+        self.initial_rgb_img = initial_rgb_img
+        self.depth_camera_coordinates = depth_camera_coordinates
+        self.robot = robot
 
     def task_completed(self):
         self.completed_task = True
@@ -116,7 +120,7 @@ class API:
 
     def detect_object(self, text_prompt):
 
-        rgb_img, depth_camera_coordinates = render_camera_in_sim()
+        rgb_img, depth_camera_coordinates = self.initial_rgb_img, self.depth_camera_coordinates
         rgb_img = Image.fromarray(rgb_img.astype('uint8'), 'RGB')
 
         x = depth_camera_coordinates[:, :, 0]
@@ -176,7 +180,7 @@ class API:
                     center_real_z = z[center_pixel_y, center_pixel_x]
 
                     print("Position of " + text_prompt + str(i) + ":", list(
-                        [np.around(center_real_x, 3), np.around(center_real_y, 3), np.around(center_real_z, 3)]))
+                        [np.around(center_real_y, 3),np.around(center_real_x, 3),  np.around(center_real_z, 3)]))
 
                     print("Dimensions:")
                     print("Width:", np.around(object_width_real, 3))
@@ -204,13 +208,17 @@ class API:
                     mask_dict[text_prompt + str(i)] = mask_np
 
     def execute_trajectory(self, trajectory):
-        # print("Adding trajectory points to the environment")
-        # print("Generated trajectory Executed")
-        print('trajectory:', trajectory)
-        pass
+        x = trajectory[-1][0]
+        y = trajectory[-1][1]
+        z = trajectory[-1][2]
+        pitch = 0
+        roll = 0
+        yaw = math.degrees(trajectory[-1][3])
+        self.robot.move_tool_xyzrpy(x, y, z, pitch, roll, yaw)
+        print("Generated trajectory Executed")
 
     def open_gripper(self):
-        pass
+        self.robot.gripper_open()
 
     def close_gripper(self):
-        pass
+        self.robot.gripper_close()
