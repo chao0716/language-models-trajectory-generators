@@ -19,6 +19,7 @@ The 3D coordinate system of the environment is as follows:
     2. The y-axis is in the depth direction, increasing away from you.
     3. The z-axis is in the vertical direction, increasing upwards.
 The robot arm end-effector is currently positioned at [INSERT EE POSITION], with the rotation value at 0, and the gripper open.
+The robot arm end-effector can not be higher than 0.25.
 The robot arm is in a top-down set-up, with the end-effector facing down onto a tabletop. The end-effector is therefore able to rotate about the z-axis, from -pi to pi radians.
 The end-effector gripper has two fingers, and they are currently parallel to the x-axis.
 The gripper can only grasp objects along sides which are shorter than 0.08.

@@ -46,8 +46,8 @@ class Kinowa:
             session_info = Session_pb2.CreateSessionInfo()
             session_info.username = self.__username
             session_info.password = self.__password
-            session_info.session_inactivity_timeout = 60000  # (milliseconds)
-            session_info.connection_inactivity_timeout = 2000  # (milliseconds)
+            session_info.session_inactivity_timeout = 600000  # (milliseconds)
+            session_info.connection_inactivity_timeout = 20000  # (milliseconds)
             self.session_manager.CreateSession(session_info)
 
             self.base = BaseClient(self.router)
@@ -105,14 +105,73 @@ class Kinowa:
         )
         return pose
     
+    def open_gripper_speed(self):
+        # Create the GripperCommand we will send
+        gripper_command = Base_pb2.GripperCommand()
+        finger = gripper_command.gripper.finger.add()
+
+        # Close the gripper with position increments
+        gripper_command.mode = Base_pb2.GRIPPER_POSITION
+        finger.finger_identifier = 1
+
+        # Set speed to open gripper
+        gripper_command.mode = Base_pb2.GRIPPER_SPEED
+        finger.value = 0.1
+        self.base.SendGripperCommand(gripper_command)
+        gripper_request = Base_pb2.GripperRequest()
+
+        # Wait for reported position to be opened
+        gripper_request.mode = Base_pb2.GRIPPER_POSITION
+        while True:
+            gripper_measure = self.base.GetMeasuredGripperMovement(gripper_request)
+            if len (gripper_measure.finger):
+                # print("Current position is : {0}".format(gripper_measure.finger[0].value))
+                if gripper_measure.finger[0].value < 0.01:
+                    break
+            else: # Else, no finger present in answer, end loop
+                break
+
+    def close_gripper_speed(self):
+
+        # Create the GripperCommand we will send
+        gripper_command = Base_pb2.GripperCommand()
+        finger = gripper_command.gripper.finger.add()
+
+        # Close the gripper with position increments
+        gripper_command.mode = Base_pb2.GRIPPER_POSITION
+        finger.finger_identifier = 1
+        
+        # Set speed to close gripper
+        gripper_command.mode = Base_pb2.GRIPPER_SPEED
+        finger.value = -0.1
+        self.base.SendGripperCommand(gripper_command)
+        gripper_request = Base_pb2.GripperRequest()
+        
+
+        # Wait for reported speed to be 0
+        gripper_request.mode = Base_pb2.GRIPPER_SPEED
+        while True:
+            gripper_measure = self.base.GetMeasuredGripperMovement(gripper_request)
+            if len (gripper_measure.finger):
+                # print("Current speed is : {0}".format(gripper_measure.finger[0].value))
+                if gripper_measure.finger[0].value == 0.0:
+                    break
+            else: # Else, no finger present in answer, end loop
+                break
+
     def control_gripper(self, position, blocking = True):
         
         # Create the gripper command request
         gripper_command = Base_pb2.GripperCommand()
         gripper_command.mode = Base_pb2.GRIPPER_POSITION
+
         finger = gripper_command.gripper.finger.add()
         finger.finger_identifier = 1
         finger.value = position  # The API uses a scale of 0-100
+        
+        print (finger)
+        return 
+
  
         notification_handle = None
         if blocking:
@@ -143,7 +202,7 @@ class Robot:
             [0.525, 0.044, 0.2],
             # [0.525, 0.044, 0.0225],
             t3d.euler.euler2mat(
-                math.radians(180), math.radians(0), math.radians(0), "sxyz"
+                math.radians(180), math.radians(0), math.radians(-90), "sxyz"
             ),
             [1, 1, 1],
         )
@@ -154,7 +213,7 @@ class Robot:
         pose = t3d.affines.compose(
             [0.25, 0.044, 0.2],
             t3d.euler.euler2mat(
-                math.radians(180), math.radians(0), math.radians(0), "sxyz"
+                math.radians(180), math.radians(0), math.radians(-90), "sxyz"
             ),
             [1, 1, 1],
         )
@@ -174,6 +233,21 @@ class Robot:
         tool_pose_change[2, 3] = z
         pose = pose @ tool_pose_change
         self.robot.move(pose, blocking=blocking)
+        
+    def move_world(self, x, y, z, yaw, blocking=True):
+        x = x + 0.525
+        y = y + 0.044
+        z = z
+        yaw = yaw
+        pose = t3d.affines.compose(
+            [x, y, z],
+            t3d.euler.euler2mat(
+                math.radians(180), math.radians(0), math.radians(-90+yaw), "sxyz"
+            ),
+            [1, 1, 1],
+        )
+        
+        self.robot.move(pose, blocking)
 
     def move_tool_ypr(self, yaw=0, pitch=0, roll=0, blocking=True):
         pose = self.robot.get_pose()
@@ -212,10 +286,10 @@ class Robot:
         self.robot.move(pose, blocking=blocking)
         
     def gripper_open(self):
-        self.robot.control_gripper(0)
+        self.robot.open_gripper_speed()
 
     def gripper_close(self):
-        self.robot.control_gripper(1)
+        self.robot.close_gripper_speed()
         
 #%%       
 if __name__ == "__main__":
@@ -223,13 +297,15 @@ if __name__ == "__main__":
     interface = Kinowa(ip="192.168.1.10")
     robot = Robot(interface)
     
-    # robot.gripper_open()    
-    # robot.gripper_close()
-    # robot.gripper_open()
+    robot.gripper_open()    
+    #%%
+    robot.gripper_close()
+    #%%
+    robot.gripper_open()
   
     robot.go_safe_place()
 #%%
-    robot.move_tool_xyzrpy(yaw=87)
+    robot.move_world(x = 0, y= 0, z = 0.2, yaw = 0)
 #%%
 #     print('up')
 #     robot.move_tool_xyzrpy(z=-0.15)

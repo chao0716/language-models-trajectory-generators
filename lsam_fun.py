@@ -9,6 +9,7 @@ from utils import render_camera_in_sim
 import cv2
 from utils import get_object_properties
 import math
+from utils import get_object_position
 def save_mask(mask_np, filename):
     mask_image = Image.fromarray((mask_np * 255).astype(np.uint8))
     mask_image.save(filename)
@@ -69,7 +70,7 @@ def print_logits(logits):
  #%% 
 if __name__ == "__main__":      
     model = LangSAM()
-    text_prompt=  "bottle"
+    text_prompt=  "cola"
     
     rgb_img, depth_camera_coordinates = render_camera_in_sim()
     rgb_img = Image.fromarray(rgb_img.astype('uint8'), 'RGB')
@@ -101,7 +102,8 @@ if __name__ == "__main__":
             # Convert logit to a scalar before rounding
             confidence_score = round(logit.item(), 2)
             # Change confidence_score if wrong object is detected
-            if confidence_score < 0.5:
+            if confidence_score < 0.3:
+                print('confidence_score:', confidence_score)
                 print(
                     f"No objects of the '{text_prompt}' prompt detected in the image.")
             else:

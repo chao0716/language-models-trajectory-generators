@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 if __name__ == "__main__":
     
-    ee_start_position = [0.0, 0, 0.2]
+    ee_start_position = [-0.275, 0, 0.2]
     openai.api_key = os.getenv("OPENAI_API_KEY")
     # Parse args
     parser = argparse.ArgumentParser(description="Main Program.")
@@ -38,13 +38,12 @@ if __name__ == "__main__":
     robot.gripper_close()
     robot.gripper_open()
     robot.go_safe_place()
-    robot.go_safe_place()
 
     initial_rgb_img, depth_camera_coordinates = render_camera_in_sim()
     initial_img_base64 = encode_image_to_base64(initial_rgb_img)
     cv2.imwrite('initial_rgb_img.png', initial_rgb_img)
     
-    #%%
+##############
     if args.mode == "text":
         command = input("Enter a command: ")
     elif args.mode == "voice":
@@ -63,7 +62,7 @@ if __name__ == "__main__":
         else:
             print("No command found in the output.")
 
-
+############
     api = API(LangSAM_model, command, args.language_model, initial_rgb_img, depth_camera_coordinates, initial_img_base64, robot)
     detect_object = api.detect_object
     execute_trajectory = api.execute_trajectory
@@ -72,14 +71,15 @@ if __name__ == "__main__":
     completed_task = api.completed_task
     failed_task = api.failed_task
     check_task_completed = api.check_task_completed
-    #%%
+
     messages_infer = []
     error = False
     prompt_infer = MAIN_PROMPT.replace("[INSERT EE POSITION]", str(ee_start_position)).replace("[INSERT TASK]", command)
     messages_infer = get_chatgpt_output(args.language_model, prompt_infer, messages_infer, "system")
     #%%
+    # robot.go_home()
     while not completed_task:
-#%%
+        
         prompt_infer = ""
     
         if len(messages_infer[-1]["content"].split("```python")) > 1:

@@ -15,6 +15,8 @@ import pybullet_data
 from class_camera import Realsense
 import cv2
 from sklearn.decomposition import PCA
+import numpy as np
+from skimage.measure import regionprops, label
 
 def get_object_position(bbox, depth_camera_coordinates):
     # Bounding box format: (x_min, y_min, x_max, y_max)
@@ -32,43 +34,47 @@ def get_object_position(bbox, depth_camera_coordinates):
     # Return the object position as (x, y, z)
     return x_position, y_position, z_position
 
-def get_object_properties(mask, x, y, z):
-    # Flatten the mask and depth map
-    mask_flat = mask.flatten()
-    x_flat = x.flatten()
-    y_flat = y.flatten()
-    z_flat = z.flatten()
+def get_object_properties(mask_np, x, y, z):
+
+    # Assuming mask_np is your binary mask
+    labeled_mask = label(mask_np)
     
-    # Extract object points using the mask
-    object_points = np.vstack((x_flat[mask_flat], y_flat[mask_flat], z_flat[mask_flat])).T
+    # Assuming there's only one object in your mask
+    properties = regionprops(labeled_mask)[0]
     
-    # Perform PCA
-    pca = PCA(n_components=2)
-    pca.fit(object_points)
+    # Length (major axis length)
+    length = properties.major_axis_length
     
-    # First principal component: major axis (longer side)
-    major_axis = pca.components_[0]
-    # Second principal component: minor axis (shorter side)
-    minor_axis = pca.components_[1]
+    # Width (minor axis length)
+    width = properties.minor_axis_length
     
-    # Project points onto principal components to get lengths along these axes
-    projected_on_major = object_points.dot(major_axis)
-    projected_on_minor = object_points.dot(minor_axis)
+    # Orientation in radians
+    orientation = properties.orientation
     
-    # Calculate length and width (extent of projections)
-    length = np.ptp(projected_on_major)
-    width = np.ptp(projected_on_minor)
+    # Convert orientation to degrees if needed
+    orientation_deg = np.degrees(orientation)
     
-    # Calculate orientation angle with respect to the x-axis
-    orientation = np.arctan2(major_axis[1], major_axis[0]) * (180.0 / np.pi)
+    # Extract the coordinates within the masked region
+    x_masked = x[mask_np > 0]
+    y_masked = y[mask_np > 0]
+    z_masked = z[mask_np > 0]
     
-    return length, width, orientation
+    # Compute the real-world bounding box
+    x_min, x_max = np.min(x_masked), np.max(x_masked)
+    y_min, y_max = np.min(y_masked), np.max(y_masked)
+    
+    # Real-world length and width
+    real_length = np.sqrt((x_max - x_min)**2 + (z[mask_np > 0][np.argmax(x_masked)] - z[mask_np > 0][np.argmin(x_masked)])**2)
+    real_width = np.sqrt((y_max - y_min)**2 + (z[mask_np > 0][np.argmax(y_masked)] - z[mask_np > 0][np.argmin(y_masked)])**2)
+    
+    return real_length, real_width, orientation_deg
 
 def render_camera_in_sim():
     d435 = Realsense()
     rgb_image, camera_coordinates = d435.get_aligned_verts()
     d435.stop_streaming()
-    camera_coordinates[:,:,2] = 0.2 - (0.645 - camera_coordinates[:,:,2])
+    offset = 0.001 # in case hit table
+    camera_coordinates[:,:,2] = (0.647 - camera_coordinates[:,:,2]) + offset
     rgb_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB)
     return rgb_image, camera_coordinates
 

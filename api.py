@@ -143,7 +143,7 @@ class API:
                 # Convert logit to a scalar before rounding
                 confidence_score = round(logit.item(), 2)
                 # Change confidence_score if wrong object is detected
-                if confidence_score < 0.5:
+                if confidence_score < 0.3:
                     print(
                         f"No objects of the '{text_prompt}' prompt detected in the image.")
                 else:
@@ -252,17 +252,42 @@ class API:
     #                 mask_dict[text_prompt + str(i)] = mask_np
 
     def execute_trajectory(self, trajectory):
-        x = trajectory[-1][0]
-        y = trajectory[-1][1]
-        z = trajectory[-1][2]
-        pitch = 0
-        roll = 0
-        yaw = math.degrees(trajectory[-1][3])
-        self.robot.move_tool_xyzrpy(x, y, z, pitch, roll, yaw)
-        print("Generated trajectory Executed")
 
+        for i in range (len(trajectory)):
+            x = trajectory[i][0]
+            y = trajectory[i][1]
+            z = trajectory[i][2]
+            yaw = math.degrees(trajectory[i][3])
+            self.robot.move_world(x, y, z, yaw)
+        print("Generated trajectory Executed")
+        
+    # def execute_trajectory(self, trajectory):
+
+    #     x = trajectory[0][0]
+    #     y = trajectory[0][1]
+    #     z = trajectory[0][2]
+    #     yaw = math.degrees(trajectory[0][3])
+    #     self.robot.move_world(x, y, z, yaw)
+        
+    #     x = trajectory[0][0]
+    #     y = trajectory[0][1]
+    #     z = trajectory[0][2]
+    #     yaw = math.degrees(trajectory[-1][3])
+    #     self.robot.move_world(x, y, z, yaw)
+        
+    #     x = trajectory[-1][0]
+    #     y = trajectory[-1][1]
+    #     z = trajectory[-1][2]
+    #     yaw = math.degrees(trajectory[-1][3])
+    #     self.robot.move_world(x, y, z, yaw)
+        
+    #     print("Generated trajectory Executed")
+        
+        
     def open_gripper(self):
         self.robot.gripper_open()
+        print("Gripper open")
 
     def close_gripper(self):
         self.robot.gripper_close()
+        print("Gripper close")
