@@ -7,8 +7,11 @@ from io import BytesIO
 from lang_sam import LangSAM
 from utils import render_camera_in_sim
 import cv2
-from utils import get_object_properties
-import math
+import numpy as np
+from sklearn.decomposition import PCA
+
+
+
 def save_mask(mask_np, filename):
     mask_image = Image.fromarray((mask_np * 255).astype(np.uint8))
     mask_image.save(filename)
@@ -64,8 +67,6 @@ def print_logits(logits):
     print("\nConfidence:")
     for i, logit in enumerate(logits):
         print(f"Logit {i+1}: {logit}")
-        
-
  #%% 
 if __name__ == "__main__":      
     model = LangSAM()
@@ -97,28 +98,18 @@ if __name__ == "__main__":
     else:
         # Convert masks to numpy arrays
         masks_np = [mask.squeeze().cpu().numpy() for mask in masks]
+    
         for i, (mask_np, box, logit) in enumerate(zip(masks_np, boxes, logits)):
             # Convert logit to a scalar before rounding
             confidence_score = round(logit.item(), 2)
             # Change confidence_score if wrong object is detected
             if confidence_score < 0.5:
-                print(
-                    f"No objects of the '{text_prompt}' prompt detected in the image.")
+                pass
             else:
                 
-                length, width, orientation = get_object_properties(mask_np, x, y, z)
-                position = get_object_position(box, depth_camera_coordinates)
-
-                print("Position of " + text_prompt + str(i) + ":", list(
-                    [np.around(position[1], 3),np.around(position[0], 3),  np.around(position[2], 3)]))
-
-                print("Dimensions:")
-                print("Width:", np.around(width, 3))
-                print("Length:", np.around(length, 3))
-                print("Height of " + text_prompt + str(i) + ":", np.around(position[2], 3))
-                print("Orientation along longer side (length):", np.around(math.radians(orientation), 3), "\n")
-
-                # Add the mask and corresponding label to the dictionary
-                mask_dict[text_prompt + str(i)] = mask_np
-                
-                
+                # Assuming mask is your mask image and depth_camera_coordinates are your x, y, z arrays
+                length, width, orientation,position = get_object_properties_and_position(mask_np, x, y, z)
+                print(f"Length: {length}")
+                print(f"Width: {width}")
+                print(f"Orientation: {orientation} degrees")
+                print(f"Position (Centroid): {position}")

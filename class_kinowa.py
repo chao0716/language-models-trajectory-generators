@@ -13,6 +13,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import threading
 
+def are_transforms_close(a, b=None, linear_tol=0.005, angular_tol=0.03):
+    if b is None:
+        b = np.eye(4)
+    c = np.linalg.inv(a) @ b
+    xyz = c[:3, 3]
+    if np.any(np.abs(xyz) > linear_tol):
+        return False
+    rpy = t3d.euler.mat2euler(c[:3, :3])
+    if np.any(np.abs(np.array(rpy)) > angular_tol):
+        return False
+    return True
 
 class Kinowa:
     def __init__(self, ip="192.168.1.10", username="admin", password="admin"):
@@ -45,6 +56,11 @@ class Kinowa:
             print(f"Failed to connect to the robot: {e}")
 
     def move(self, pose, blocking=True):
+        while not are_transforms_close(self.get_pose(), pose):
+            self._move(pose, blocking)
+            # time.sleep(0.01)
+            
+    def _move(self, pose, blocking=True):
         rpy = t3d.euler.mat2euler(pose[:3, :3], "sxyz")
         xyz = pose[:3, 3]
         command = Base_pb2.ConstrainedPose()
@@ -207,14 +223,13 @@ if __name__ == "__main__":
     interface = Kinowa(ip="192.168.1.10")
     robot = Robot(interface)
     
-    robot.gripper_open()    
-    robot.gripper_close()
-    robot.gripper_open()
+    # robot.gripper_open()    
+    # robot.gripper_close()
+    # robot.gripper_open()
   
     robot.go_safe_place()
-    robot.go_safe_place()
 #%%
-    robot.move_tool_xyzrpy(yaw=90)
+    robot.move_tool_xyzrpy(yaw=87)
 #%%
 #     print('up')
 #     robot.move_tool_xyzrpy(z=-0.15)

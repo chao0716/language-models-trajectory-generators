@@ -14,6 +14,56 @@ import pybullet as p
 import pybullet_data
 from class_camera import Realsense
 import cv2
+from sklearn.decomposition import PCA
+
+def get_object_position(bbox, depth_camera_coordinates):
+    # Bounding box format: (x_min, y_min, x_max, y_max)
+    x_min, y_min, x_max, y_max = bbox
+    
+    # Calculate the center of the bounding box and ensure it's an integer
+    center_x = int((x_min + x_max) / 2)
+    center_y = int((y_min + y_max) / 2)
+    
+    # Extract the depth information at the center of the bounding box
+    x_position = depth_camera_coordinates[center_y, center_x, 0]
+    y_position = depth_camera_coordinates[center_y, center_x, 1]
+    z_position = depth_camera_coordinates[center_y, center_x, 2]
+    
+    # Return the object position as (x, y, z)
+    return x_position, y_position, z_position
+
+def get_object_properties(mask, x, y, z):
+    # Flatten the mask and depth map
+    mask_flat = mask.flatten()
+    x_flat = x.flatten()
+    y_flat = y.flatten()
+    z_flat = z.flatten()
+    
+    # Extract object points using the mask
+    object_points = np.vstack((x_flat[mask_flat], y_flat[mask_flat], z_flat[mask_flat])).T
+    
+    # Perform PCA
+    pca = PCA(n_components=2)
+    pca.fit(object_points)
+    
+    # First principal component: major axis (longer side)
+    major_axis = pca.components_[0]
+    # Second principal component: minor axis (shorter side)
+    minor_axis = pca.components_[1]
+    
+    # Project points onto principal components to get lengths along these axes
+    projected_on_major = object_points.dot(major_axis)
+    projected_on_minor = object_points.dot(minor_axis)
+    
+    # Calculate length and width (extent of projections)
+    length = np.ptp(projected_on_major)
+    width = np.ptp(projected_on_minor)
+    
+    # Calculate orientation angle with respect to the x-axis
+    orientation = np.arctan2(major_axis[1], major_axis[0]) * (180.0 / np.pi)
+    
+    return length, width, orientation
+
 def render_camera_in_sim():
     d435 = Realsense()
     rgb_image, camera_coordinates = d435.get_aligned_verts()
